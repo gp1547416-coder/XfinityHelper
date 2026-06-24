@@ -190,8 +190,14 @@
 
     const renderedMessageIds = new Set();
     
-    // Create a timestamp mark right when the user opens up the webpage
-    const sessionStartTime = new Date();
+    // Manage dynamic clean tracking variables
+    let currentSessionId = urlParams.get('session');
+    
+    if (!currentSessionId && !isAgentMode) {
+        // Create an automated unique ID string for this user's live instance
+        currentSessionId = 'sess_' + Math.random().toString(36).substr(2, 9);
+        window.history.replaceState(null, '', window.location.pathname + '?session=' + currentSessionId);
+    }
 
     function initInterface() {
         if (isAgentMode) {
@@ -199,7 +205,7 @@
             chatHeader.innerText = "💻 Agent Control Desktop (You)";
             chatHeader.style.background = "#343a40";
             chatHeader.style.color = "white";
-            statusBanner.innerText = "🟢 Secure Agent Line Active";
+            statusBanner.innerText = "🟢 Active Queue Streams";
             statusBanner.style.background = "#343a40";
             statusBanner.style.color = "#66ff66";
             statusBanner.style.borderColor = "#4b5563";
@@ -214,6 +220,13 @@
         onSnapshot(sessionDocRef, (snapshot) => {
             if (!snapshot.exists()) return;
             const data = snapshot.data();
+            
+            // Sync session ID onto agent view if agent loaded blindly
+            if (isAgentMode && data.activeSessionId && currentSessionId !== data.activeSessionId) {
+                currentSessionId = data.activeSessionId;
+                restartMessageListener();
+            }
+
             if (isAgentMode) {
                 typingIndicator.style.display = data.customerTyping ? "block" : "none";
             } else {
@@ -221,14 +234,25 @@
             }
         });
 
-        // CRITICAL UPDATE: Filter out any database text item created before sessionStartTime
+        if (!isAgentMode && currentSessionId) {
+            setDoc(sessionDocRef, { activeSessionId: currentSessionId }, { merge: true });
+            restartMessageListener();
+        }
+    }
+
+    let unsubscribeMessages = null;
+    function restartMessageListener() {
+        if (unsubscribeMessages) unsubscribeMessages();
+        if (!currentSessionId) return;
+
+        // Instantly stream messages matching the current sessionId filter
         const q = query(
             messagesCollectionRef, 
-            orderBy("timestamp", "asc"),
-            where("timestamp", ">", sessionStartTime)
+            where("sessionId", "==", currentSessionId),
+            orderBy("timestamp", "asc")
         );
 
-        onSnapshot(q, (snapshot) => {
+        unsubscribeMessages = onSnapshot(q, (snapshot) => {
             snapshot.docChanges().forEach((change) => {
                 if (change.type === "added") {
                     const messageId = change.doc.id;
@@ -263,6 +287,7 @@
             await addDoc(messagesCollectionRef, {
                 text: userTxt,
                 sender: 'user',
+                sessionId: currentSessionId,
                 timestamp: serverTimestamp()
             });
 
@@ -270,6 +295,7 @@
                 await addDoc(messagesCollectionRef, {
                     text: botResponse,
                     sender: 'bot',
+                    sessionId: currentSessionId,
                     timestamp: serverTimestamp()
                 });
 
@@ -278,7 +304,7 @@
                 returnBtn.innerText = "Chat with a live agent";
                 returnBtn.onclick = startCustomerHandover;
                 presetBox.appendChild(returnBtn);
-            }, 600);
+            }, 400);
         } catch (err) {
             console.log("Selection error: ", err);
         }
@@ -290,12 +316,14 @@
             await addDoc(messagesCollectionRef, {
                 text: "Chat with a live agent",
                 sender: 'user',
+                sessionId: currentSessionId,
                 timestamp: serverTimestamp()
             });
 
             await addDoc(messagesCollectionRef, {
                 text: "Locating an open support desk queue...",
                 sender: 'bot',
+                sessionId: currentSessionId,
                 timestamp: serverTimestamp()
             });
             
@@ -307,9 +335,10 @@
                 await addDoc(messagesCollectionRef, {
                     text: "Connected! You are now chatting with a live agent.",
                     sender: 'bot',
+                    sessionId: currentSessionId,
                     timestamp: serverTimestamp()
                 });
-            }, 1200);
+            }, 800);
         } catch (err) {
             console.log("Handover error: ", err);
         }
@@ -329,7 +358,7 @@
 
     async function handleSend() {
         const msgText = chatInput.value.trim();
-        if(!msgText) return;
+        if(!msgText || !currentSessionId) return;
 
         chatInput.value = '';
         const roleLabel = isAgentMode ? 'agent' : 'user';
@@ -340,6 +369,7 @@
             await addDoc(messagesCollectionRef, {
                 text: msgText,
                 sender: roleLabel,
+                sessionId: currentSessionId,
                 timestamp: serverTimestamp()
             });
         } catch(err) {
