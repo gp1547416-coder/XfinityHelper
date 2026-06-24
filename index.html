@@ -9,7 +9,6 @@
             --primary: #0066ff;
             --bg-dark: #f4f6f9;
             --chat-bg: #ffffff;
-            --text-main: #333333;
             --bot-bubble: #f0f2f5;
             --user-bubble: #0066ff;
             --agent-bubble: #343a40;
@@ -83,7 +82,6 @@
         .user { background: var(--user-bubble); color: white; align-self: flex-end; border-top-right-radius: 4px; }
         .agent { background: var(--agent-bubble); color: white; align-self: flex-start; border-top-left-radius: 4px; }
         
-        /* Agent UI perspective modifiers */
         .agent-only-view .user { align-self: flex-start; background: #e0e0e0; color: #333333; }
         .agent-only-view .user a { color: #0066ff; }
         .agent-only-view .agent { align-self: flex-end; background: var(--agent-bubble); }
@@ -161,7 +159,26 @@
     </div>
 </div>
 
-<script>
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getFirestore, doc, setDoc, onSnapshot, updateDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+    // Linked Cloud Cluster Profile configurations
+    const firebaseConfig = {
+        apiKey: "AIzaSyCAt3wIzy7Mhx13CHTKAi2RmM2KjowZgiM",
+        authDomain: "xfinityhelper-85a05.firebaseapp.com",
+        databaseURL: "https://xfinityhelper-85a05-default-rtdb.firebaseio.com",
+        projectId: "xfinityhelper-85a05",
+        storageBucket: "xfinityhelper-85a05.firebasestorage.app",
+        messagingSenderId: "329336506874",
+        appId: "1:329336506874:web:a7c87ce2731309edd93c43",
+        measurementId: "G-2J962Y9Q1M"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const chatDocRef = doc(db, "chats", "wifimaster-session");
+
     const chatWindow = document.getElementById('chatWindow');
     const chatHeader = document.getElementById('chatHeader');
     const chatFeed = document.getElementById('chatFeed');
@@ -172,15 +189,13 @@
     const chatInput = document.getElementById('chatInput');
     const sendBtn = document.getElementById('sendBtn');
 
-    // Read URL query string parameter configuration
     const urlParams = new URLSearchParams(window.location.search);
-    const userRole = urlParams.get('role'); // Pulls value assigned to "?role="
+    let isAgentMode = (urlParams.get('role') === 'agent');
 
-    let isAgentMode = (userRole === 'agent');
+    let localMessageCount = 0;
 
     function initInterface() {
         if (isAgentMode) {
-            // Setup private single-screen Agent environment
             chatWindow.classList.add('agent-only-view');
             chatHeader.innerText = "💻 Agent Control Desktop (You)";
             chatHeader.style.background = "#343a40";
@@ -193,32 +208,45 @@
             inputBar.style.display = "flex";
             sendBtn.style.background = "#343a40";
             
-            addMessage(chatFeed, "System: Active monitoring online. Awaiting customer contact vectors...", "bot");
-            
-            // Simulated user connection for validation testing
-            setTimeout(() => {
-                typingIndicator.innerText = "Customer is typing...";
-                typingIndicator.style.display = "block";
-                setTimeout(() => {
-                    typingIndicator.style.display = "none";
-                    addMessage(chatFeed, "Hello, my internet speeds are terrible. Can you link me to a speed test profile?", "user");
-                }, 2000);
-            }, 1500);
-
+            // Wipe test remnants on admin initialization
+            setDoc(chatDocRef, { messages: [], customerTyping: false, agentTyping: false });
         } else {
-            // Standard Customer Interface
             addMessage(chatFeed, "Hello! Welcome to Wifi Master support. What seems to be the trouble today?", "bot");
             renderPresets();
         }
+
+        // Live Cloud Data Sync Pipeline
+        onSnapshot(chatDocRef, (snapshot) => {
+            if (!snapshot.exists()) return;
+            const data = snapshot.data();
+
+            // Handles real-time cross-device typing statuses
+            if (isAgentMode) {
+                typingIndicator.innerText = "Customer is typing...";
+                typingIndicator.style.display = data.customerTyping ? "block" : "none";
+            } else {
+                typingIndicator.innerText = "Agent is typing...";
+                typingIndicator.style.display = data.agentTyping ? "block" : "none";
+            }
+
+            // Sync down incoming database packets
+            const remoteMessages = data.messages || [];
+            if (remoteMessages.length > localMessageCount) {
+                for (let i = localMessageCount; i < remoteMessages.length; i++) {
+                    const msg = remoteMessages[i];
+                    addMessage(chatFeed, msg.text, msg.sender);
+                }
+                localMessageCount = remoteMessages.length;
+            }
+        });
     }
 
     function renderPresets() {
         presetBox.innerHTML = '';
         const options = [
-            { text: "My speeds are slow", action: () => handleUserSelection("My speeds are slow", "We recommend unplugging your gateway for 30 seconds to run a powercycle. If that fails, touch the option below to flag a live agent assignment.") },
+            { text: "My speeds are slow", action: () => handleUserSelection("My speeds are slow", "We recommend running a powercycle. If that fails, click below to page a live operator.") },
             { text: "Chat with a live agent", action: () => startCustomerHandover() }
         ];
-
         options.forEach(opt => {
             const btn = document.createElement('button');
             btn.className = 'btn';
@@ -250,8 +278,48 @@
             chatHeader.innerText = "Live Customer Chat Line";
             statusBanner.style.display = "block";
             inputBar.style.display = "flex";
-            addMessage(chatFeed, "Connected! An agent has accepted your handoff queue. Type your message below to begin troubleshooting.", "bot");
+            addMessage(chatFeed, "Connected! You are now chatting with a live agent.", "bot");
         }, 1200);
+    }
+
+    // Capture and broadcast user keystroke activity state to database
+    let typingTimeout;
+    chatInput.oninput = () => {
+        const typingField = isAgentMode ? { agentTyping: true } : { customerTyping: true };
+        const stopField = isAgentMode ? { agentTyping: false } : { customerTyping: false };
+        
+        updateDoc(chatDocRef, typingField);
+        
+        clearTimeout(typingTimeout);
+        typingTimeout = setTimeout(() => {
+            updateDoc(chatDocRef, stopField);
+        }, 1500);
+    };
+
+    async function handleSend() {
+        const msgText = chatInput.value.trim();
+        if(!msgText) return;
+
+        chatInput.value = '';
+        const roleLabel = isAgentMode ? 'agent' : 'user';
+        const stopTypingField = isAgentMode ? { agentTyping: false } : { customerTyping: false };
+
+        try {
+            updateDoc(chatDocRef, stopTypingField);
+            
+            // Request transaction array snapshot to inject new elements safely
+            onSnapshot(chatDocRef, async (snap) => {
+                if(!snap.exists()) return;
+                const currentData = snap.data();
+                const list = currentData.messages || [];
+                
+                const updatedList = [...list, { text: msgText, sender: roleLabel }];
+                await setDoc(chatDocRef, { ...currentData, messages: updatedList }, { merge: true });
+            }, { WilcoxOnly: true });
+            
+        } catch(err) {
+            console.log("Database sync interruption: ", err);
+        }
     }
 
     function formatText(raw) {
@@ -266,14 +334,6 @@
         div.innerHTML = formatText(text);
         feed.appendChild(div);
         feed.scrollTop = feed.scrollHeight;
-    }
-
-    function handleSend() {
-        const msg = chatInput.value.trim();
-        if(msg) {
-            addMessage(chatFeed, msg, isAgentMode ? 'agent' : 'user');
-            chatInput.value = '';
-        }
     }
 
     sendBtn.onclick = handleSend;
