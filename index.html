@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wifi Master - Live Support Chat</title>
+    <style>
+        :root {
+            --primary: #0066ff;
+            --bg-dark: #f4f6f9;
+            --chat-bg: #ffffff;
+            --text-main: #333333;
+            --text-muted: #666666;
+            --bot-bubble: #f0f2f5;
+            --user-bubble: #0066ff;
+            --agent-bubble: #343a40;
+            --success: #28a745;
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+
+        .sandbox-container {
+            display: flex;
+            gap: 20px;
+            max-width: 95%;
+        }
+
+        .window {
+            width: 380px;
+            height: 600px;
+            background: var(--chat-bg);
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border: 1px solid #e1e4e8;
+        }
+
+        #agentWindow {
+            display: none;
+            border-color: #343a40;
+        }
+
+        .header {
+            background: #ffffff;
+            padding: 16px;
+            font-weight: 600;
+            border-bottom: 1px solid #e1e4e8;
+            font-size: 1.05em;
+        }
+
+        .status-banner {
+            background: #e2f0d9;
+            color: var(--success);
+            padding: 8px 16px;
+            font-size: 0.85em;
+            font-weight: bold;
+            border-bottom: 1px solid #c5e1b7;
+            display: none;
+        }
+
+        .feed {
+            flex: 1;
+            padding: 18px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            scroll-behavior: smooth;
+            background: #fafafa;
+        }
+
+        .msg {
+            max-width: 80%;
+            padding: 11px 15px;
+            border-radius: 18px;
+            font-size: 0.95em;
+            line-height: 1.4;
+            word-wrap: break-word;
+        }
+
+        .bot { background: var(--bot-bubble); color: #333333; align-self: flex-start; border-top-left-radius: 4px; }
+        .user { background: var(--user-bubble); color: white; align-self: flex-end; border-top-right-radius: 4px; }
+        .agent { background: var(--agent-bubble); color: white; align-self: flex-start; border-top-left-radius: 4px; }
+        .system-status { background: #fff3cd; color: #856404; align-self: center; font-size: 0.85em; font-weight: 500; border-radius: 8px; text-align: center; }
+        
+        /* New Typing Indicator Layout styles */
+        .typing-indicator {
+            align-self: flex-start;
+            background: transparent;
+            color: #888888;
+            font-size: 0.85em;
+            font-style: italic;
+            padding: 2px 10px;
+            display: none;
+        }
+
+        .agent-view .user { align-self: flex-start; background: #e0e0e0; color: #333333; }
+        .agent-view .agent { align-self: flex-end; background: var(--agent-bubble); }
+
+        .presets {
+            padding: 14px;
+            background: #ffffff;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            border-top: 1px solid #e1e4e8;
+        }
+
+        .btn {
+            background: #ffffff;
+            border: 1px solid #0066ff;
+            color: #0066ff;
+            padding: 8px 14px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 0.85em;
+            font-weight: 500;
+        }
+
+        .btn:hover {
+            background: #0066ff;
+            color: white;
+        }
+
+        .input-bar {
+            display: flex;
+            padding: 12px;
+            background: #ffffff;
+            gap: 8px;
+            border-top: 1px solid #e1e4e8;
+        }
+
+        input {
+            flex: 1;
+            background: #f0f2f5;
+            border: 1px solid #e1e4e8;
+            color: #333333;
+            padding: 10px 14px;
+            border-radius: 20px;
+            outline: none;
+        }
+
+        .send-btn {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        #agentSend { background: var(--agent-bubble); }
+    </style>
+</head>
+<body>
+
+<div class="sandbox-container">
+    
+    <div class="window" id="customerWindow">
+        <div class="header" id="custHeader">Wifi Master Assistant</div>
+        <div class="status-banner" id="custStatusBanner">🟢 Connected to Live Agent</div>
+        <div class="feed" id="custFeed">
+            <div class="msg bot">Hello! Thanks for choosing Wifi Master support. What seems to be the trouble?</div>
+        </div>
+        <div class="typing-indicator" id="custTypingView">Agent is typing...</div>
+        <div class="presets" id="presetBox"></div>
+        <div class="input-bar" id="custInputBar" style="display: none;">
+            <input type="text" id="custInput" placeholder="Type a message...">
+            <button class="send-btn" id="custSend">Send</button>
+        </div>
+    </div>
+
+    <div class="window agent-view" id="agentWindow">
+        <div class="header" style="background: #343a40; color: white;">💻 Agent Desktop (You)</div>
+        <div class="status-banner" id="agentStatusBanner" style="background: #343a40; color: #66ff66; border-color: #4b5563;">🟢 Secure Connection Confirmed</div>
+        <div class="feed" id="agentFeed">
+            <div class="msg bot" style="background: #e9ecef;">System: Waiting for client requests...</div>
+        </div>
+        <div class="typing-indicator" id="agentTypingView">Customer is typing...</div>
+        <div class="input-bar">
+            <input type="text" id="agentInput" placeholder="Type reply back to client...">
+            <button class="send-btn" id="agentSend">Send</button>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    const custFeed = document.getElementById('custFeed');
+    const agentFeed = document.getElementById('agentFeed');
+    const presetBox = document.getElementById('presetBox');
+    const custInputBar = document.getElementById('custInputBar');
+    const agentWindow = document.getElementById('agentWindow');
+    const custHeader = document.getElementById('custHeader');
+    const custStatusBanner = document.getElementById('custStatusBanner');
+    const agentStatusBanner = document.getElementById('agentStatusBanner');
+    const custTypingView = document.getElementById('custTypingView');
+    const agentTypingView = document.getElementById('agentTypingView');
+    
+    const custInput = document.getElementById('custInput');
+    const custSend = document.getElementById('custSend');
+    const agentInput = document.getElementById('agentInput');
+    const agentSend = document.getElementById('agentSend');
+
+    const steps = {
+        start: {
+            text: "Select a category to get started:",
+            buttons: [
+                { text: "My speeds are slow", nextStep: "slow" },
+                { text: "Chat with an agent", nextStep: "handover" }
+            ]
+        },
+        slow: {
+            text: "Unplug your router for 30 seconds to restart it. If that fails, connect to our live desk.",
+            buttons: [{ text: "Connect to live support", nextStep: "handover" }]
+        },
+        handover: {
+            text: "Locating an open support desk queue...",
+            buttons: [],
+            isHandover: true
+        }
+    };
+
+    function renderStep(key) {
+        const step = steps[key];
+        if (step.text) addMessage(custFeed, step.text, 'bot');
+        
+        if (step.isHandover) {
+            presetBox.style.display = 'none';
+            
+            setTimeout(() => {
+                custInputBar.style.display = 'flex';
+                agentWindow.style.display = 'flex'; 
+                custHeader.innerText = "Live Support Session";
+                
+                custStatusBanner.style.display = "block";
+                agentStatusBanner.style.display = "block";
+                
+                addMessage(custFeed, "Connected! Agent is reviewing your account history.", "system-status");
+                addMessage(agentFeed, "System: Handover completed safely. Say hello!", "bot");
+            }, 1200);
+            return;
+        }
+
+        presetBox.innerHTML = '';
+        step.buttons.forEach(b => {
+            const btn = document.createElement('button');
+            btn.className = 'btn';
+            btn.innerText = b.text;
+            btn.onclick = () => {
+                addMessage(custFeed, b.text, 'user');
+                presetBox.innerHTML = '';
+                setTimeout(() => renderStep(b.nextStep), 500);
+            };
+            presetBox.appendChild(btn);
+        });
+    }
+
+    function addMessage(targetFeed, text, type) {
+        const div = document.createElement('div');
+        div.className = `msg ${type}`;
+        div.innerText = text;
+        targetFeed.appendChild(div);
+        targetFeed.scrollTop = targetFeed.scrollHeight;
+    }
+
+    // --- Typing Listener Logic ---
+    custInput.oninput = () => {
+        if (custInput.value.trim().length > 0) {
+            agentTypingView.style.display = "block";
+        } else {
+            agentTypingView.style.display = "none";
+        }
+    };
+
+    agentInput.oninput = () => {
+        if (agentInput.value.trim().length > 0) {
+            custTypingView.style.display = "block";
+        } else {
+            custTypingView.style.display = "none";
+        }
+    };
+
+    function handleCustomerSend() {
+        const msg = custInput.value.trim();
+        if(msg) {
+            addMessage(custFeed, msg, 'user');
+            addMessage(agentFeed, msg, 'user');
+            custInput.value = '';
+            agentTypingView.style.display = "none"; // Hide indicator once sent
+        }
+    }
+
+    function handleAgentSend() {
+        const msg = agentInput.value.trim();
+        if(msg) {
+            addMessage(custFeed, msg, 'agent');
+            addMessage(agentFeed, msg, 'agent');
+            agentInput.value = '';
+            custTypingView.style.display = "none"; // Hide indicator once sent
+        }
+    }
+
+    custSend.onclick = handleCustomerSend;
+    custInput.onkeydown = (e) => { if(e.key === 'Enter') handleCustomerSend(); };
+    
+    agentSend.onclick = handleAgentSend;
+    agentInput.onkeydown = (e) => { if(e.key === 'Enter') handleAgentSend(); };
+
+    renderStep('start');
+</script>
+
+</body>
+</html>
