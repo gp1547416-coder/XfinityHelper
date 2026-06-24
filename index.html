@@ -248,30 +248,65 @@
         });
     }
 
-    function handleUserSelection(userTxt, botResponse) {
-        addMessage(chatFeed, userTxt, 'user');
+    async function handleUserSelection(userTxt, botResponse) {
         presetBox.innerHTML = '';
-        setTimeout(() => {
-            addMessage(chatFeed, botResponse, 'bot');
-            const returnBtn = document.createElement('button');
-            returnBtn.className = 'btn';
-            returnBtn.innerText = "Chat with a live agent";
-            returnBtn.onclick = startCustomerHandover;
-            presetBox.appendChild(returnBtn);
-        }, 600);
+        
+        try {
+            // Automatically log the problem selection straight to the database so the agent sees it
+            await addDoc(messagesCollectionRef, {
+                text: userTxt,
+                sender: 'user',
+                timestamp: serverTimestamp()
+            });
+
+            setTimeout(async () => {
+                await addDoc(messagesCollectionRef, {
+                    text: botResponse,
+                    sender: 'bot',
+                    timestamp: serverTimestamp()
+                });
+
+                const returnBtn = document.createElement('button');
+                returnBtn.className = 'btn';
+                returnBtn.innerText = "Chat with a live agent";
+                returnBtn.onclick = startCustomerHandover;
+                presetBox.appendChild(returnBtn);
+            }, 600);
+        } catch (err) {
+            console.log("Selection error: ", err);
+        }
     }
 
-    function startCustomerHandover() {
-        addMessage(chatFeed, "Chat with a live agent", 'user');
+    async function startCustomerHandover() {
         presetBox.innerHTML = '';
-        addMessage(chatFeed, "Locating an open support desk queue...", 'bot');
         
-        setTimeout(() => {
-            chatHeader.innerText = "Live Customer Chat Line";
-            statusBanner.style.display = "block";
-            inputBar.style.display = "flex";
-            addMessage(chatFeed, "Connected! You are now chatting with a live agent.", "bot");
-        }, 1200);
+        try {
+            await addDoc(messagesCollectionRef, {
+                text: "Chat with a live agent",
+                sender: 'user',
+                timestamp: serverTimestamp()
+            });
+
+            await addDoc(messagesCollectionRef, {
+                text: "Locating an open support desk queue...",
+                sender: 'bot',
+                timestamp: serverTimestamp()
+            });
+            
+            setTimeout(async () => {
+                chatHeader.innerText = "Live Customer Chat Line";
+                statusBanner.style.display = "block";
+                inputBar.style.display = "flex";
+                
+                await addDoc(messagesCollectionRef, {
+                    text: "Connected! You are now chatting with a live agent.",
+                    sender: 'bot',
+                    timestamp: serverTimestamp()
+                });
+            }, 1200);
+        } catch (err) {
+            console.log("Handover error: ", err);
+        }
     }
 
     let typingTimeout;
@@ -296,7 +331,6 @@
         const stopTypingField = isAgentMode ? { agentTyping: false } : { customerTyping: false };
 
         try {
-            // Force create/merge doc properties instantly to bypass web console issues
             await setDoc(sessionDocRef, stopTypingField, { merge: true });
             
             await addDoc(messagesCollectionRef, {
