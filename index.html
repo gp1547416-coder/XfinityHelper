@@ -156,7 +156,7 @@
 
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getFirestore, doc, collection, addDoc, onSnapshot, updateDoc, setDoc, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    import { getFirestore, doc, collection, addDoc, onSnapshot, updateDoc, setDoc, query, orderBy, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
     const firebaseConfig = {
         apiKey: "AIzaSyCAt3wIzy7Mhx13CHTKAi2RmM2KjowZgiM",
@@ -189,6 +189,9 @@
     let isAgentMode = (urlParams.get('role') === 'agent');
 
     const renderedMessageIds = new Set();
+    
+    // Create a timestamp mark right when the user opens up the webpage
+    const sessionStartTime = new Date();
 
     function initInterface() {
         if (isAgentMode) {
@@ -218,7 +221,13 @@
             }
         });
 
-        const q = query(messagesCollectionRef, orderBy("timestamp", "asc"));
+        // CRITICAL UPDATE: Filter out any database text item created before sessionStartTime
+        const q = query(
+            messagesCollectionRef, 
+            orderBy("timestamp", "asc"),
+            where("timestamp", ">", sessionStartTime)
+        );
+
         onSnapshot(q, (snapshot) => {
             snapshot.docChanges().forEach((change) => {
                 if (change.type === "added") {
@@ -250,9 +259,7 @@
 
     async function handleUserSelection(userTxt, botResponse) {
         presetBox.innerHTML = '';
-        
         try {
-            // Automatically log the problem selection straight to the database so the agent sees it
             await addDoc(messagesCollectionRef, {
                 text: userTxt,
                 sender: 'user',
@@ -279,7 +286,6 @@
 
     async function startCustomerHandover() {
         presetBox.innerHTML = '';
-        
         try {
             await addDoc(messagesCollectionRef, {
                 text: "Chat with a live agent",
@@ -313,7 +319,6 @@
     chatInput.oninput = () => {
         const typingField = isAgentMode ? { agentTyping: true } : { customerTyping: true };
         const stopField = isAgentMode ? { agentTyping: false } : { customerTyping: false };
-        
         setDoc(sessionDocRef, typingField, { merge: true });
         
         clearTimeout(typingTimeout);
@@ -332,7 +337,6 @@
 
         try {
             await setDoc(sessionDocRef, stopTypingField, { merge: true });
-            
             await addDoc(messagesCollectionRef, {
                 text: msgText,
                 sender: roleLabel,
