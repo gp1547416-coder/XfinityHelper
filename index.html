@@ -84,7 +84,7 @@
         
         .agent-only-view .user { align-self: flex-start; background: #e0e0e0; color: #333333; }
         .agent-only-view .user a { color: #0066ff; }
-        .agent-only-view .agent { align-self: flex-end; background: var(--agent-bubble); }
+        .agent-only-view .agent { align-end: flex-end; align-self: flex-end; background: var(--agent-bubble); }
 
         .typing-indicator {
             align-self: flex-start;
@@ -161,9 +161,8 @@
 
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getFirestore, doc, setDoc, onSnapshot, updateDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    import { getFirestore, doc, collection, addDoc, onSnapshot, updateDoc, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-    // Linked Cloud Cluster Profile configurations
     const firebaseConfig = {
         apiKey: "AIzaSyCAt3wIzy7Mhx13CHTKAi2RmM2KjowZgiM",
         authDomain: "xfinityhelper-85a05.firebaseapp.com",
@@ -177,7 +176,10 @@
 
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
-    const chatDocRef = doc(db, "chats", "wifimaster-session");
+    
+    // Core document targets
+    const sessionDocRef = doc(db, "chats", "wifimaster-session");
+    const messagesCollectionRef = collection(db, "chats", "wifimaster-session", "messages");
 
     const chatWindow = document.getElementById('chatWindow');
     const chatHeader = document.getElementById('chatHeader');
@@ -192,7 +194,8 @@
     const urlParams = new URLSearchParams(window.location.search);
     let isAgentMode = (urlParams.get('role') === 'agent');
 
-    let localMessageCount = 0;
+    // Keep track of IDs we already rendered locally so we never duplicate
+    const renderedMessageIds = new Set();
 
     function initInterface() {
         if (isAgentMode) {
@@ -208,19 +211,20 @@
             inputBar.style.display = "flex";
             sendBtn.style.background = "#343a40";
             
-            // Wipe test remnants on admin initialization
-            setDoc(chatDocRef, { messages: [], customerTyping: false, agentTyping: false });
+            // Clean typing rules without erasing historic message items
+            updateDoc(sessionDocRef, { customerTyping: false, agentTyping: false }).catch(() => {
+                // Fallback if document doesn't exist yet
+                setDoc(sessionDocRef, { customerTyping: false, agentTyping: false });
+            });
         } else {
             addMessage(chatFeed, "Hello! Welcome to Wifi Master support. What seems to be the trouble today?", "bot");
             renderPresets();
         }
 
-        // Live Cloud Data Sync Pipeline
-        onSnapshot(chatDocRef, (snapshot) => {
+        // Listener 1: Monitor Typing Metas
+        onSnapshot(sessionDocRef, (snapshot) => {
             if (!snapshot.exists()) return;
             const data = snapshot.data();
-
-            // Handles real-time cross-device typing statuses
             if (isAgentMode) {
                 typingIndicator.innerText = "Customer is typing...";
                 typingIndicator.style.display = data.customerTyping ? "block" : "none";
@@ -228,16 +232,22 @@
                 typingIndicator.innerText = "Agent is typing...";
                 typingIndicator.style.display = data.agentTyping ? "block" : "none";
             }
+        });
 
-            // Sync down incoming database packets
-            const remoteMessages = data.messages || [];
-            if (remoteMessages.length > localMessageCount) {
-                for (let i = localMessageCount; i < remoteMessages.length; i++) {
-                    const msg = remoteMessages[i];
-                    addMessage(chatFeed, msg.text, msg.sender);
+        // Listener 2: Safe Real-Time Ordered Message Streaming
+        const q = query(messagesCollectionRef, orderBy("timestamp", "asc"));
+        onSnapshot(q, (snapshot) => {
+            snapshot.docChanges().forEach((change) => {
+                if (change.type === "added") {
+                    const messageId = change.doc.id;
+                    // Strict duplication guard rule
+                    if (!renderedMessageIds.has(messageId)) {
+                        renderedMessageIds.add(messageId);
+                        const msgData = change.doc.data();
+                        addMessage(chatFeed, msgData.text, msgData.sender);
+                    }
                 }
-                localMessageCount = remoteMessages.length;
-            }
+            });
         });
     }
 
@@ -282,17 +292,16 @@
         }, 1200);
     }
 
-    // Capture and broadcast user keystroke activity state to database
     let typingTimeout;
     chatInput.oninput = () => {
         const typingField = isAgentMode ? { agentTyping: true } : { customerTyping: true };
         const stopField = isAgentMode ? { agentTyping: false } : { customerTyping: false };
         
-        updateDoc(chatDocRef, typingField);
+        updateDoc(sessionDocRef, typingField);
         
         clearTimeout(typingTimeout);
         typingTimeout = setTimeout(() => {
-            updateDoc(chatDocRef, stopField);
+            updateDoc(sessionDocRef, stopField);
         }, 1500);
     };
 
@@ -305,20 +314,17 @@
         const stopTypingField = isAgentMode ? { agentTyping: false } : { customerTyping: false };
 
         try {
-            updateDoc(chatDocRef, stopTypingField);
+            // Turn off typing notification state
+            await updateDoc(sessionDocRef, stopTypingField);
             
-            // Request transaction array snapshot to inject new elements safely
-            onSnapshot(chatDocRef, async (snap) => {
-                if(!snap.exists()) return;
-                const currentData = snap.data();
-                const list = currentData.messages || [];
-                
-                const updatedList = [...list, { text: msgText, sender: roleLabel }];
-                await setDoc(chatDocRef, { ...currentData, messages: updatedList }, { merge: true });
-            }, { WilcoxOnly: true });
-            
+            // Push message directly into sub-collection with server time execution stamp
+            await addDoc(messagesCollectionRef, {
+                text: msgText,
+                sender: roleLabel,
+                timestamp: serverTimestamp()
+            });
         } catch(err) {
-            console.log("Database sync interruption: ", err);
+            console.log("Database write error: ", err);
         }
     }
 
