@@ -74,17 +74,12 @@
             line-height: 1.4;
         }
 
-        .msg a { color: inherit; text-decoration: underline; font-weight: 600; }
-        .user a { color: #ffffff; }
-        .agent a { color: #66ccff; }
-
         .bot { background: var(--bot-bubble); color: #333333; align-self: flex-start; border-top-left-radius: 4px; }
         .user { background: var(--user-bubble); color: white; align-self: flex-end; border-top-right-radius: 4px; }
         .agent { background: var(--agent-bubble); color: white; align-self: flex-start; border-top-left-radius: 4px; }
         
         .agent-only-view .user { align-self: flex-start; background: #e0e0e0; color: #333333; }
-        .agent-only-view .user a { color: #0066ff; }
-        .agent-only-view .agent { align-end: flex-end; align-self: flex-end; background: var(--agent-bubble); }
+        .agent-only-view .agent { align-self: flex-end; background: var(--agent-bubble); }
 
         .typing-indicator {
             align-self: flex-start;
@@ -161,7 +156,7 @@
 
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getFirestore, doc, collection, addDoc, onSnapshot, updateDoc, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    import { getFirestore, doc, collection, addDoc, onSnapshot, updateDoc, setDoc, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
     const firebaseConfig = {
         apiKey: "AIzaSyCAt3wIzy7Mhx13CHTKAi2RmM2KjowZgiM",
@@ -177,7 +172,6 @@
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
     
-    // Core document targets
     const sessionDocRef = doc(db, "chats", "wifimaster-session");
     const messagesCollectionRef = collection(db, "chats", "wifimaster-session", "messages");
 
@@ -194,7 +188,6 @@
     const urlParams = new URLSearchParams(window.location.search);
     let isAgentMode = (urlParams.get('role') === 'agent');
 
-    // Keep track of IDs we already rendered locally so we never duplicate
     const renderedMessageIds = new Set();
 
     function initInterface() {
@@ -210,37 +203,26 @@
             statusBanner.style.display = "block";
             inputBar.style.display = "flex";
             sendBtn.style.background = "#343a40";
-            
-            // Clean typing rules without erasing historic message items
-            updateDoc(sessionDocRef, { customerTyping: false, agentTyping: false }).catch(() => {
-                // Fallback if document doesn't exist yet
-                setDoc(sessionDocRef, { customerTyping: false, agentTyping: false });
-            });
         } else {
             addMessage(chatFeed, "Hello! Welcome to Wifi Master support. What seems to be the trouble today?", "bot");
             renderPresets();
         }
 
-        // Listener 1: Monitor Typing Metas
         onSnapshot(sessionDocRef, (snapshot) => {
             if (!snapshot.exists()) return;
             const data = snapshot.data();
             if (isAgentMode) {
-                typingIndicator.innerText = "Customer is typing...";
                 typingIndicator.style.display = data.customerTyping ? "block" : "none";
             } else {
-                typingIndicator.innerText = "Agent is typing...";
                 typingIndicator.style.display = data.agentTyping ? "block" : "none";
             }
         });
 
-        // Listener 2: Safe Real-Time Ordered Message Streaming
         const q = query(messagesCollectionRef, orderBy("timestamp", "asc"));
         onSnapshot(q, (snapshot) => {
             snapshot.docChanges().forEach((change) => {
                 if (change.type === "added") {
                     const messageId = change.doc.id;
-                    // Strict duplication guard rule
                     if (!renderedMessageIds.has(messageId)) {
                         renderedMessageIds.add(messageId);
                         const msgData = change.doc.data();
@@ -297,11 +279,11 @@
         const typingField = isAgentMode ? { agentTyping: true } : { customerTyping: true };
         const stopField = isAgentMode ? { agentTyping: false } : { customerTyping: false };
         
-        updateDoc(sessionDocRef, typingField);
+        setDoc(sessionDocRef, typingField, { merge: true });
         
         clearTimeout(typingTimeout);
         typingTimeout = setTimeout(() => {
-            updateDoc(sessionDocRef, stopField);
+            setDoc(sessionDocRef, stopField, { merge: true });
         }, 1500);
     };
 
@@ -314,30 +296,23 @@
         const stopTypingField = isAgentMode ? { agentTyping: false } : { customerTyping: false };
 
         try {
-            // Turn off typing notification state
-            await updateDoc(sessionDocRef, stopTypingField);
+            // Force create/merge doc properties instantly to bypass web console issues
+            await setDoc(sessionDocRef, stopTypingField, { merge: true });
             
-            // Push message directly into sub-collection with server time execution stamp
             await addDoc(messagesCollectionRef, {
                 text: msgText,
                 sender: roleLabel,
                 timestamp: serverTimestamp()
             });
         } catch(err) {
-            console.log("Database write error: ", err);
+            console.log("Write error: ", err);
         }
-    }
-
-    function formatText(raw) {
-        let txt = raw.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-        txt = txt.replace(/(\b(https?):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig, '<a href="$1" target="_blank">$1</a>');
-        return txt.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
     }
 
     function addMessage(feed, text, type) {
         const div = document.createElement('div');
         div.className = `msg ${type}`;
-        div.innerHTML = formatText(text);
+        div.innerText = text;
         feed.appendChild(div);
         feed.scrollTop = feed.scrollHeight;
     }
